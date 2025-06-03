@@ -12,15 +12,23 @@ from langchain_community.document_loaders import (
 # pip install docx2txt, pypdf
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, AzureOpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
+from langchain_community.embeddings import OllamaEmbeddings
+
 dotenv.load_dotenv()
 
+# Properties
 os.environ["USER_AGENT"] = "myagent"
 DB_DOCS_LIMIT = 10
+MAX_COLLECTIONS = 20
+OLLAMA_MODEL_NAME = "deepseek-r1:latest"
+CHUNK_SIZE=5000
+CHUNK_OVERLAP=1000
+
 
 # Function to stream the response of the LLM 
 def stream_llm_response(llm_stream, messages):
@@ -99,15 +107,10 @@ def load_url_to_db():
 
 
 def initialize_vector_db(docs):
-    if "AZ_OPENAI_API_KEY" not in os.environ:
+    if os.getenv("OPENAI_API_KEY") is not None:
         embedding = OpenAIEmbeddings(api_key=st.session_state.openai_api_key)
     else:
-        embedding = AzureOpenAIEmbeddings(
-            api_key=os.getenv("AZ_OPENAI_API_KEY"), 
-            azure_endpoint=os.getenv("AZ_OPENAI_ENDPOINT"),
-            model="text-embedding-3-large",
-            openai_api_version="2024-02-15-preview",
-        )
+        embedding = OllamaEmbeddings(model=OLLAMA_MODEL_NAME)
 
     vector_db = Chroma.from_documents(
         documents=docs,
@@ -115,11 +118,11 @@ def initialize_vector_db(docs):
         collection_name=f"{str(time()).replace('.', '')[:14]}_" + st.session_state['session_id'],
     )
 
-    # We need to manage the number of collections that we have in memory, we will keep the last 20
+    # We need to manage the number of collections that we have in memory, we will keep the last configured in MAX_COLLECTIONS
     chroma_client = vector_db._client
     collection_names = sorted([collection.name for collection in chroma_client.list_collections()])
     print("Number of collections:", len(collection_names))
-    while len(collection_names) > 20:
+    while len(collection_names) > MAX_COLLECTIONS:
         chroma_client.delete_collection(collection_names[0])
         collection_names.pop(0)
 
@@ -128,8 +131,8 @@ def initialize_vector_db(docs):
 
 def _split_and_load_docs(docs):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=5000,
-        chunk_overlap=1000,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
     )
 
     document_chunks = text_splitter.split_documents(docs)
